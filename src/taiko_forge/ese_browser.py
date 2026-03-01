@@ -12,6 +12,9 @@ from pathlib import Path
 _API = "https://git.vanillaaaa.org/api/v1/repos/ESE/ESE/contents"
 _RAW = "https://git.vanillaaaa.org/ESE/ESE/raw/branch/master"
 
+# In-memory genre cache so switching genres doesn't re-fetch from the API
+_genre_cache: dict[str, list[dict]] = {}
+
 GENRES = [
     "01 Pop",
     "02 Anime",
@@ -34,11 +37,14 @@ def _api_get(path: str) -> list:
         return json.loads(resp.read())
 
 
-def list_songs(genre: str) -> list[dict]:
+def list_songs(genre: str, *, use_cache: bool = True) -> list[dict]:
     """Return song dicts for *genre*.
 
     Each dict has: ``name``, ``path``, ``tja_url``, ``ogg_url``.
+    Results are cached in memory so switching genres is instant.
     """
+    if use_cache and genre in _genre_cache:
+        return _genre_cache[genre]
     items = _api_get(genre)
     songs = []
     for item in items:
@@ -56,7 +62,9 @@ def list_songs(genre: str) -> list[dict]:
                 "ogg_url": f"{base}/{enc_name}.ogg",
             }
         )
-    return sorted(songs, key=lambda s: s["name"].lower())
+    songs = sorted(songs, key=lambda s: s["name"].lower())
+    _genre_cache[genre] = songs
+    return songs
 
 
 def download_tja(song: dict, dest_dir: Path) -> Path:
