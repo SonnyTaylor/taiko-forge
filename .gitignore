@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+
+# uv
+# uv.lock is committed for reproducible installs
+
+# Tool binaries (proprietary, not distributable)
+tools/at3tool/*.exe
+tools/at3tool/*.dll
+
+# Audio files (large, user-specific)
+*.ogg
+*.mp3
+*.wav
+*.flac
+*.at3
+
+# App config (user-specific)
+taiko_dlc_maker_config.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

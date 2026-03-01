@@ -1,0 +1,20 @@
+[project]
+name = "taiko-forge"
+version = "1.0.0"
+description = "Custom DLC builder for Taiko no Tatsujin Portable DX (PSP)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "tja2fumen>=0.9.0",
+]
+
+[project.scripts]
+taiko-forge = "taiko_forge.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/taiko_forge"]

@@ -1,0 +1,23 @@
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "taiko-forge"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "tja2fumen" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "tja2fumen", specifier = ">=0.9.0" }]
+
+[[package]]
+name = "tja2fumen"
+version = "0.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/81/0f8f5ddd68a2f33d63cb8fe2d99d85917b8dda4d6e2613fd3ba8881b0ab3/tja2fumen-0.9.0.tar.gz", hash = "sha256:09889089f02ef55c1b69ba5eeb5f50bd54cd8b613e43ec6fe6c18defd99cc1b7", size = 58863, upload-time = "2024-10-30T04:15:57.159Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/59/6e/1c96e8eb0b015f4c94654913b4c3325ecc18aab9b6534da6fd95ed492f9f/tja2fumen-0.9.0-py3-none-any.whl", hash = "sha256:6d7ab4fd5d75492d271a75fd9dbbcbb5e41408db67736bbf2ddb497f58e004f1", size = 55195, upload-time = "2024-10-30T04:15:55.802Z" },
+]
