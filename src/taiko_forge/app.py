@@ -463,7 +463,7 @@ class App:
 
         # ── Setup ──────────────────────────────────────────────────
         setup_frame = ttk.LabelFrame(m, text="  Setup  ", style="TLabelframe")
-        setup_frame.pack(fill="x", **pad, pady=(8, 4))
+        setup_frame.pack(fill="x", padx=16, pady=(8, 4))
         si = ttk.Frame(setup_frame, style="Card.TFrame")
         si.pack(fill="x", padx=12, pady=8)
         si.columnconfigure(1, weight=1)
@@ -643,7 +643,7 @@ class App:
 
         # ── Step 3 — Build ─────────────────────────────────────────
         s3 = ttk.LabelFrame(m, text="  Step 3 — Build  ", style="TLabelframe")
-        s3.pack(fill="x", **pad, pady=(4, 4))
+        s3.pack(fill="x", padx=16, pady=(4, 4))
         s3i = ttk.Frame(s3, style="Card.TFrame")
         s3i.pack(fill="x", padx=12, pady=12)
 
