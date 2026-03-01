@@ -1,4 +1,4 @@
-"""Taiko Forge GUI application."""
+"""Taiko Forge GUI application — customtkinter edition."""
 
 import os
 import re
@@ -7,7 +7,9 @@ import sys
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 from taiko_forge.builder import DLCBuilder
 from taiko_forge.config import CONFIG_DIR, find_tool, load_config, save_config
@@ -15,98 +17,124 @@ from taiko_forge.tja import parse_tja
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# When frozen by PyInstaller __file__ lives in a temp dir — use the persistent
-# config dir for tool downloads so they survive between launches.
 if getattr(sys, "frozen", False):
     _TOOLS_DIR = CONFIG_DIR / "tools"
 else:
     _TOOLS_DIR = _PROJECT_ROOT / "tools"
 
 
-# ======================================================================
-# Catppuccin Mocha palette
-# ======================================================================
+# ── Catppuccin Mocha ────────────────────────────────────────────────
 class C:
-    BG = "#1e1e2e"
-    SURFACE = "#313244"
-    SURFACE2 = "#45475a"
+    CRUST = "#11111b"
+    MANTLE = "#181825"
+    BASE = "#1e1e2e"
+    SURFACE0 = "#313244"
+    SURFACE1 = "#45475a"
+    SURFACE2 = "#585b70"
+    OVERLAY0 = "#6c7086"
+    OVERLAY1 = "#7f849c"
+    SUBTEXT0 = "#a6adc8"
+    SUBTEXT1 = "#bac2de"
     TEXT = "#cdd6f4"
-    SUBTEXT = "#a6adc8"
-    RED = "#f38ba8"
-    GREEN = "#a6e3a1"
+    LAVENDER = "#b4befe"
     BLUE = "#89b4fa"
-    PEACH = "#fab387"
-    YELLOW = "#f9e2af"
+    SAPPHIRE = "#74c7ec"
+    SKY = "#89dceb"
     TEAL = "#94e2d5"
+    GREEN = "#a6e3a1"
+    YELLOW = "#f9e2af"
+    PEACH = "#fab387"
+    MAROON = "#eba0ac"
+    RED = "#f38ba8"
+    MAUVE = "#cba6f7"
+    PINK = "#f5c2e7"
+    FLAMINGO = "#f2cdcd"
+    ROSEWATER = "#f5e0dc"
 
 
-# ======================================================================
-# Small reusable modal: download progress
-# ======================================================================
-class _ProgressDialog:
-    """Small modal window showing a download progress bar."""
+# ── Apply Catppuccin theme on customtkinter ─────────────────────────
+def _apply_catppuccin():
+    """Configure customtkinter to use Catppuccin Mocha colors."""
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+
+# ── Progress Dialog ─────────────────────────────────────────────────
+class ProgressDialog(ctk.CTkToplevel):
+    """Modal dialog showing download progress."""
 
     def __init__(self, parent, title: str):
-        self.win = tk.Toplevel(parent)
-        self.win.title(title)
-        self.win.geometry("400x130")
-        self.win.resizable(False, False)
-        self.win.configure(bg=C.BG)
-        self.win.transient(parent)
-        self.win.grab_set()
-        self.win.protocol("WM_DELETE_WINDOW", lambda: None)  # block close
+        super().__init__(parent)
+        self.title(title)
+        self.geometry("440x160")
+        self.resizable(False, False)
+        self.configure(fg_color=C.BASE)
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
 
-        self._status = tk.StringVar(value="Connecting…")
-        self._prog = tk.DoubleVar(value=0.0)
+        self.after(10, self.focus_force)
 
-        ttk.Label(self.win, textvariable=self._status, style="TLabel").pack(
-            padx=16, pady=(18, 6)
+        self._status_var = ctk.StringVar(value="Connecting…")
+        self._prog_var = ctk.DoubleVar(value=0.0)
+
+        ctk.CTkLabel(
+            self,
+            textvariable=self._status_var,
+            font=ctk.CTkFont(size=13),
+            text_color=C.TEXT,
+        ).pack(padx=20, pady=(24, 8))
+
+        self._bar = ctk.CTkProgressBar(
+            self,
+            variable=self._prog_var,
+            width=400,
+            height=14,
+            progress_color=C.GREEN,
+            fg_color=C.SURFACE0,
+            corner_radius=7,
         )
-        ttk.Progressbar(
-            self.win,
-            variable=self._prog,
-            maximum=1.0,
-            mode="determinate",
-            style="Horizontal.TProgressbar",
-        ).pack(fill="x", padx=16, pady=(0, 8))
-        self._btn = ttk.Button(
-            self.win,
+        self._bar.pack(padx=20, pady=(0, 12))
+
+        self._btn = ctk.CTkButton(
+            self,
             text="Close",
             state="disabled",
-            command=self.win.destroy,
-            style="Browse.TButton",
+            command=self.destroy,
+            fg_color=C.SURFACE1,
+            hover_color=C.SURFACE2,
+            text_color=C.TEXT,
+            corner_radius=8,
+            width=100,
+            height=32,
         )
-        self._btn.pack(pady=(0, 12))
+        self._btn.pack(pady=(0, 16))
 
-    # thread-safe updates
     def status(self, text: str):
-        self.win.after(0, self._status.set, text)
+        self.after(0, self._status_var.set, text)
 
     def progress(self, frac: float):
-        self.win.after(0, self._prog.set, frac)
+        self.after(0, self._prog_var.set, frac)
 
     def done(self, msg: str = "Done!"):
-        self.win.after(0, self._finish, msg, True)
+        self.after(0, self._finish, msg)
 
     def error(self, msg: str):
-        self.win.after(0, self._finish, f"Error: {msg}", True)
+        self.after(0, self._finish, f"Error: {msg}")
 
-    def _finish(self, msg: str, enable_close: bool):
-        self._status.set(msg)
-        self._prog.set(1.0)
-        if enable_close:
-            self.win.protocol("WM_DELETE_WINDOW", self.win.destroy)
-            self._btn.configure(state="normal")
+    def _finish(self, msg: str):
+        self._status_var.set(msg)
+        self._prog_var.set(1.0)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._btn.configure(state="normal")
 
 
-# ======================================================================
-# ESE Online Song Browser dialog
-# ======================================================================
-class _ESEDialog:
-    """Browse and download songs from the ESE TJA database (online)."""
+# ── ESE Browser Dialog ──────────────────────────────────────────────
+class ESEDialog(ctk.CTkToplevel):
+    """Browse and download songs from the ESE database."""
 
     def __init__(self, parent, on_select):
-        """on_select(tja_path: str, ogg_path: str) called on success."""
+        super().__init__(parent)
         from taiko_forge.ese_browser import GENRES
 
         self.on_select = on_select
@@ -114,118 +142,176 @@ class _ESEDialog:
         self.filtered: list[dict] = []
         self._genres = GENRES
 
-        self.win = tk.Toplevel(parent)
-        self.win.title("ESE Song Browser")
-        self.win.geometry("580x500")
-        self.win.minsize(460, 400)
-        self.win.configure(bg=C.BG)
-        self.win.transient(parent)
-        self.win.grab_set()
+        self.title("ESE Song Browser")
+        self.geometry("640x560")
+        self.minsize(500, 440)
+        self.configure(fg_color=C.BASE)
+        self.transient(parent)
+        self.grab_set()
+        self.after(10, self.focus_force)
 
         self._build_ui()
-        # Kick off first genre load
         self._load_genre(self._genres[0])
 
-    # ------------------------------------------------------------------
     def _build_ui(self):
-        s = self.win
+        # ── Top bar ──
+        top = ctk.CTkFrame(self, fg_color=C.MANTLE, corner_radius=12)
+        top.pack(fill="x", padx=16, pady=(16, 8))
 
-        # ── top bar ──────────────────────────────────────────────────
-        top = ttk.Frame(s)
-        top.pack(fill="x", padx=12, pady=(12, 6))
+        row1 = ctk.CTkFrame(top, fg_color="transparent")
+        row1.pack(fill="x", padx=14, pady=(12, 6))
 
-        ttk.Label(top, text="Genre:").pack(side="left")
-        self._genre_var = tk.StringVar(value=self._genres[0])
-        cb = ttk.Combobox(
-            top,
-            textvariable=self._genre_var,
+        ctk.CTkLabel(
+            row1,
+            text="Genre",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C.SUBTEXT0,
+        ).pack(side="left", padx=(0, 8))
+        self._genre_var = ctk.StringVar(value=self._genres[0])
+        genre_menu = ctk.CTkOptionMenu(
+            row1,
+            variable=self._genre_var,
             values=self._genres,
-            state="readonly",
-            width=24,
+            command=self._load_genre,
+            fg_color=C.SURFACE0,
+            button_color=C.SURFACE1,
+            button_hover_color=C.SURFACE2,
+            text_color=C.TEXT,
+            dropdown_fg_color=C.SURFACE0,
+            dropdown_hover_color=C.SURFACE1,
+            dropdown_text_color=C.TEXT,
+            width=220,
+            height=32,
+            corner_radius=8,
         )
-        cb.pack(side="left", padx=(4, 16))
-        cb.bind("<<ComboboxSelected>>", lambda _: self._load_genre(self._genre_var.get()))
+        genre_menu.pack(side="left")
 
-        ttk.Label(top, text="Search:").pack(side="left")
-        self._search_var = tk.StringVar()
+        ctk.CTkLabel(
+            row1,
+            text="Search",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C.SUBTEXT0,
+        ).pack(side="left", padx=(20, 8))
+        self._search_var = ctk.StringVar()
         self._search_var.trace_add("write", lambda *_: self._filter())
-        ttk.Entry(top, textvariable=self._search_var).pack(
-            side="left", fill="x", expand=True, padx=(4, 0)
-        )
+        ctk.CTkEntry(
+            row1,
+            textvariable=self._search_var,
+            fg_color=C.SURFACE0,
+            border_color=C.SURFACE1,
+            text_color=C.TEXT,
+            placeholder_text="Filter songs…",
+            placeholder_text_color=C.OVERLAY0,
+            height=32,
+            corner_radius=8,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 0))
 
-        # ── count + listbox ──────────────────────────────────────────
-        mid = ttk.Frame(s)
-        mid.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+        # ── Count label ──
+        self._count_var = ctk.StringVar(value="Loading…")
+        ctk.CTkLabel(
+            top,
+            textvariable=self._count_var,
+            font=ctk.CTkFont(size=11),
+            text_color=C.SUBTEXT0,
+        ).pack(anchor="w", padx=16, pady=(0, 10))
 
-        self._count_var = tk.StringVar(value="Loading…")
-        ttk.Label(mid, textvariable=self._count_var, style="Sub.TLabel").pack(
-            anchor="w", pady=(0, 4)
-        )
+        # ── Song list ──
+        self._list_frame_outer = ctk.CTkFrame(self, fg_color=C.MANTLE, corner_radius=12)
+        self._list_frame_outer.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
-        lf = tk.Frame(mid, bg=C.SURFACE2, bd=0)
-        lf.pack(fill="both", expand=True)
-        self._lb = tk.Listbox(
-            lf,
-            bg=C.SURFACE2,
+        self._listbox = tk.Listbox(
+            self._list_frame_outer,
+            bg=C.MANTLE,
             fg=C.TEXT,
             selectbackground=C.BLUE,
-            selectforeground=C.BG,
-            font=("Segoe UI", 10),
+            selectforeground=C.CRUST,
+            font=("Segoe UI", 11),
             activestyle="none",
             relief="flat",
             bd=0,
+            highlightthickness=0,
+            selectmode="single",
         )
-        sb = ttk.Scrollbar(lf, command=self._lb.yview)
-        self._lb.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self._lb.pack(fill="both", expand=True, padx=2, pady=2)
-        self._lb.bind("<<ListboxSelect>>", self._on_lb_select)
-        # Double-click to download immediately
-        self._lb.bind("<Double-Button-1>", lambda _: self._download_and_use())
+        sb = ctk.CTkScrollbar(
+            self._list_frame_outer,
+            command=self._listbox.yview,
+            fg_color=C.MANTLE,
+            button_color=C.SURFACE1,
+            button_hover_color=C.SURFACE2,
+        )
+        self._listbox.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y", padx=(0, 4), pady=6)
+        self._listbox.pack(fill="both", expand=True, padx=6, pady=6)
+        self._listbox.bind("<<ListboxSelect>>", self._on_lb_select)
+        self._listbox.bind("<Double-Button-1>", lambda _: self._download_and_use())
 
-        # ── selected song info ───────────────────────────────────────
-        self._info_var = tk.StringVar(value="Select a song, then click Download & Use.")
-        ttk.Label(
-            s,
+        # ── Info + progress ──
+        info_frame = ctk.CTkFrame(self, fg_color=C.MANTLE, corner_radius=12)
+        info_frame.pack(fill="x", padx=16, pady=(0, 8))
+        self._info_var = ctk.StringVar(
+            value="Select a song, then click Download & Use."
+        )
+        ctk.CTkLabel(
+            info_frame,
             textvariable=self._info_var,
-            style="Info.TLabel",
-            wraplength=540,
-        ).pack(padx=12, anchor="w", pady=(0, 4))
+            font=ctk.CTkFont(size=12),
+            text_color=C.BLUE,
+            wraplength=580,
+            justify="left",
+        ).pack(padx=14, pady=(10, 4), anchor="w")
 
-        # ── download progress ────────────────────────────────────────
-        self._dl_prog = tk.DoubleVar(value=0.0)
-        ttk.Progressbar(
-            s,
+        self._dl_prog = ctk.DoubleVar(value=0.0)
+        self._dl_bar = ctk.CTkProgressBar(
+            info_frame,
             variable=self._dl_prog,
-            maximum=1.0,
-            mode="determinate",
-            style="Horizontal.TProgressbar",
-        ).pack(fill="x", padx=12, pady=(0, 2))
-        self._dl_status = tk.StringVar(value="")
-        ttk.Label(s, textvariable=self._dl_status, style="Sub.TLabel").pack(
-            padx=12, anchor="w", pady=(0, 6)
+            width=580,
+            height=8,
+            progress_color=C.GREEN,
+            fg_color=C.SURFACE0,
+            corner_radius=4,
         )
+        self._dl_bar.pack(padx=14, pady=(0, 2))
+        self._dl_status = ctk.StringVar(value="")
+        ctk.CTkLabel(
+            info_frame,
+            textvariable=self._dl_status,
+            font=ctk.CTkFont(size=11),
+            text_color=C.SUBTEXT0,
+        ).pack(padx=14, anchor="w", pady=(0, 10))
 
-        # ── buttons ──────────────────────────────────────────────────
-        bf = ttk.Frame(s)
-        bf.pack(fill="x", padx=12, pady=(0, 14))
-        self._btn_dl = ttk.Button(
-            bf,
-            text="Download & Use Song",
-            style="Build.TButton",
+        # ── Buttons ──
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=16, pady=(0, 16))
+
+        self._btn_dl = ctk.CTkButton(
+            btn_frame,
+            text="⬇  Download & Use Song",
             command=self._download_and_use,
             state="disabled",
+            fg_color=C.BLUE,
+            hover_color=C.LAVENDER,
+            text_color=C.CRUST,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            corner_radius=10,
+            height=38,
         )
         self._btn_dl.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        ttk.Button(
-            bf, text="Cancel", style="Browse.TButton", command=self.win.destroy
+        ctk.CTkButton(
+            btn_frame,
+            text="Cancel",
+            command=self.destroy,
+            fg_color=C.SURFACE1,
+            hover_color=C.SURFACE2,
+            text_color=C.TEXT,
+            corner_radius=10,
+            height=38,
+            width=100,
         ).pack(side="right")
 
-    # ------------------------------------------------------------------
     def _load_genre(self, genre: str):
         self.songs = []
         self.filtered = []
-        self._lb.delete(0, "end")
+        self._listbox.delete(0, "end")
         self._count_var.set("Loading…")
         self._btn_dl.configure(state="disabled")
         self._search_var.set("")
@@ -235,9 +321,9 @@ class _ESEDialog:
 
             try:
                 songs = list_songs(genre)
-                self.win.after(0, self._set_songs, songs)
+                self.after(0, self._set_songs, songs)
             except Exception as exc:
-                self.win.after(0, self._count_var.set, f"Error loading: {exc}")
+                self.after(0, self._count_var.set, f"Error: {exc}")
 
         threading.Thread(target=fetch, daemon=True).start()
 
@@ -248,13 +334,13 @@ class _ESEDialog:
     def _filter(self):
         q = self._search_var.get().lower()
         self.filtered = [s for s in self.songs if q in s["name"].lower()]
-        self._lb.delete(0, "end")
+        self._listbox.delete(0, "end")
         for s in self.filtered:
-            self._lb.insert("end", "  " + s["name"])
+            self._listbox.insert("end", "  " + s["name"])
         self._count_var.set(f"{len(self.filtered)} songs")
 
     def _on_lb_select(self, _evt=None):
-        sel = self._lb.curselection()
+        sel = self._listbox.curselection()
         if not sel:
             self._btn_dl.configure(state="disabled")
             return
@@ -263,7 +349,7 @@ class _ESEDialog:
         self._btn_dl.configure(state="normal")
 
     def _download_and_use(self):
-        sel = self._lb.curselection()
+        sel = self._listbox.curselection()
         if not sel:
             return
         song = self.filtered[sel[0]]
@@ -271,10 +357,9 @@ class _ESEDialog:
         tja_path = dest_dir / f"{song['name']}.tja"
         ogg_path = dest_dir / f"{song['name']}.ogg"
 
-        # Already cached
         if tja_path.exists() and ogg_path.exists():
             self.on_select(str(tja_path), str(ogg_path))
-            self.win.destroy()
+            self.destroy()
             return
 
         self._btn_dl.configure(state="disabled")
@@ -286,16 +371,16 @@ class _ESEDialog:
 
             try:
                 download_tja(song, dest_dir)
-                self.win.after(0, self._dl_status.set, "Downloading audio…")
-                self.win.after(0, self._dl_prog.set, 0.25)
+                self.after(0, self._dl_status.set, "Downloading audio…")
+                self.after(0, self._dl_prog.set, 0.25)
 
                 def _audio_prog(f):
-                    self.win.after(0, self._dl_prog.set, 0.25 + f * 0.75)
+                    self.after(0, self._dl_prog.set, 0.25 + f * 0.75)
 
                 download_audio(song, dest_dir, _audio_prog)
-                self.win.after(0, self._on_dl_done, str(tja_path), str(ogg_path))
+                self.after(0, self._on_dl_done, str(tja_path), str(ogg_path))
             except Exception as exc:
-                self.win.after(0, self._on_dl_error, str(exc))
+                self.after(0, self._on_dl_error, str(exc))
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -303,414 +388,476 @@ class _ESEDialog:
         self._dl_status.set("Done!")
         self._dl_prog.set(1.0)
         self.on_select(tja, ogg)
-        self.win.destroy()
+        self.destroy()
 
     def _on_dl_error(self, msg: str):
         self._dl_status.set(f"Error: {msg}")
         self._btn_dl.configure(state="normal")
 
 
+# ── Helper: create a labeled row ────────────────────────────────────
+def _labeled_entry(parent, label, var, row, *, browse_cmd=None, extra_btn=None):
+    """Add a row: label + entry + optional browse + optional extra button."""
+    ctk.CTkLabel(
+        parent,
+        text=label,
+        font=ctk.CTkFont(size=12),
+        text_color=C.SUBTEXT1,
+    ).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=6)
+
+    entry = ctk.CTkEntry(
+        parent,
+        textvariable=var,
+        fg_color=C.SURFACE0,
+        border_color=C.SURFACE1,
+        text_color=C.TEXT,
+        corner_radius=8,
+        height=34,
+    )
+    entry.grid(row=row, column=1, sticky="ew", pady=6, padx=(0, 6))
+
+    col = 2
+    if browse_cmd:
+        ctk.CTkButton(
+            parent,
+            text="Browse",
+            command=browse_cmd,
+            fg_color=C.SURFACE1,
+            hover_color=C.SURFACE2,
+            text_color=C.TEXT,
+            corner_radius=8,
+            width=80,
+            height=32,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=row, column=col, pady=6, padx=(0, 4))
+        col += 1
+    if extra_btn:
+        lbl, cmd, color = extra_btn
+        ctk.CTkButton(
+            parent,
+            text=lbl,
+            command=cmd,
+            fg_color=color,
+            hover_color=C.SURFACE2,
+            text_color=C.CRUST if color != C.SURFACE1 else C.TEXT,
+            corner_radius=8,
+            width=110,
+            height=32,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=row, column=col, pady=6)
+    return entry
+
+
+# ── Card frame helper ───────────────────────────────────────────────
+def _card(parent, title: str, icon: str = "") -> ctk.CTkFrame:
+    """Create a Catppuccin 'card' frame with a section header."""
+    wrapper = ctk.CTkFrame(parent, fg_color="transparent")
+    wrapper.pack(fill="x", padx=0, pady=(0, 4))
+
+    header = ctk.CTkFrame(wrapper, fg_color="transparent")
+    header.pack(fill="x", padx=4, pady=(0, 4))
+    ctk.CTkLabel(
+        header,
+        text=f"{icon}  {title}" if icon else title,
+        font=ctk.CTkFont(size=14, weight="bold"),
+        text_color=C.PEACH,
+    ).pack(side="left")
+
+    card = ctk.CTkFrame(wrapper, fg_color=C.MANTLE, corner_radius=14)
+    card.pack(fill="x")
+    inner = ctk.CTkFrame(card, fg_color="transparent")
+    inner.pack(fill="x", padx=16, pady=14)
+    inner.columnconfigure(1, weight=1)
+    return inner
+
+
 # ======================================================================
 # Main application
 # ======================================================================
-class App:
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self.root.title("Taiko Forge")
-        self.root.geometry("800x960")
-        self.root.minsize(680, 800)
-        self.root.configure(bg=C.BG)
-        self.root.option_add("*Font", ("Segoe UI", 10))
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        _apply_catppuccin()
+
+        self.title("Taiko Forge")
+        self.geometry("860x980")
+        self.minsize(700, 820)
+        self.configure(fg_color=C.BASE)
 
         self.cfg = load_config()
         self.building = False
 
-        self._setup_styles()
         self._build_ui()
         self._restore_state()
         self._check_deps()
 
-    # ── styling ─────────────────────────────────────────────────────
-    def _setup_styles(self):
-        s = ttk.Style()
-        s.theme_use("clam")
-        s.configure(
-            ".",
-            background=C.BG,
-            foreground=C.TEXT,
-            fieldbackground=C.SURFACE,
-            borderwidth=0,
-        )
-        s.configure("TFrame", background=C.BG)
-        s.configure("Card.TFrame", background=C.SURFACE)
-        s.configure("TLabel", background=C.BG, foreground=C.TEXT, font=("Segoe UI", 10))
-        s.configure("Card.TLabel", background=C.SURFACE, foreground=C.TEXT)
-        s.configure(
-            "Header.TLabel",
-            background=C.BG,
-            foreground=C.PEACH,
-            font=("Segoe UI", 11, "bold"),
-        )
-        s.configure(
-            "Title.TLabel",
-            background=C.BG,
-            foreground=C.TEXT,
-            font=("Segoe UI", 18, "bold"),
-        )
-        s.configure(
-            "Sub.TLabel", background=C.BG, foreground=C.SUBTEXT, font=("Segoe UI", 9)
-        )
-        s.configure(
-            "Info.TLabel",
-            background=C.SURFACE,
-            foreground=C.BLUE,
-            font=("Segoe UI Semibold", 10),
-        )
-        s.configure(
-            "TEntry",
-            fieldbackground=C.SURFACE2,
-            foreground=C.TEXT,
-            insertcolor=C.TEXT,
-        )
-        s.configure(
-            "TButton",
-            background=C.SURFACE2,
-            foreground=C.TEXT,
-            font=("Segoe UI Semibold", 10),
-            padding=(12, 6),
-        )
-        s.map(
-            "TButton",
-            background=[("active", C.BLUE), ("disabled", C.SURFACE)],
-            foreground=[("active", C.BG), ("disabled", C.SUBTEXT)],
-        )
-        s.configure(
-            "Build.TButton",
-            background=C.BLUE,
-            foreground=C.BG,
-            font=("Segoe UI", 13, "bold"),
-            padding=(20, 10),
-        )
-        s.map(
-            "Build.TButton",
-            background=[("active", C.GREEN), ("disabled", C.SURFACE)],
-            foreground=[("active", C.BG), ("disabled", C.SUBTEXT)],
-        )
-        s.configure("Browse.TButton", padding=(8, 4), font=("Segoe UI", 9))
-        s.configure("Download.TButton", padding=(8, 4), font=("Segoe UI", 9))
-        s.map(
-            "Download.TButton",
-            background=[("active", C.TEAL), ("disabled", C.SURFACE)],
-            foreground=[("active", C.BG)],
-        )
-        s.configure(
-            "Horizontal.TProgressbar",
-            troughcolor=C.SURFACE2,
-            background=C.GREEN,
-            thickness=8,
-        )
-        s.configure(
-            "TLabelframe",
-            background=C.SURFACE,
-            foreground=C.PEACH,
-            font=("Segoe UI", 10, "bold"),
-        )
-        s.configure(
-            "TLabelframe.Label",
-            background=C.SURFACE,
-            foreground=C.PEACH,
-            font=("Segoe UI", 10, "bold"),
-        )
-        s.configure("TCombobox", fieldbackground=C.SURFACE2, foreground=C.TEXT)
-
-    # ── UI build ─────────────────────────────────────────────────────
+    # ── UI Construction ─────────────────────────────────────────────
     def _build_ui(self):
-        outer = tk.Frame(self.root, bg=C.BG)
-        outer.pack(fill="both", expand=True)
+        # ── Main scrollable area ──
+        container = ctk.CTkScrollableFrame(
+            self,
+            fg_color=C.BASE,
+            scrollbar_button_color=C.SURFACE1,
+            scrollbar_button_hover_color=C.SURFACE2,
+        )
+        container.pack(fill="both", expand=True, padx=0, pady=0)
 
-        canvas = tk.Canvas(outer, bg=C.BG, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        self.scroll_frame = ttk.Frame(canvas, style="TFrame")
-        self.scroll_frame.bind(
-            "<Configure>",
-            lambda _: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
-        canvas.create_window((0, 0), window=self.scroll_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        canvas.bind_all(
-            "<MouseWheel>",
-            lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"),
-        )
-        canvas.bind(
-            "<Configure>",
-            lambda e: canvas.itemconfig(canvas.find_all()[0], width=e.width),
-        )
+        content = ctk.CTkFrame(container, fg_color="transparent")
+        content.pack(fill="x", padx=24, pady=16)
 
-        pad = {"padx": 16, "pady": (4, 4)}
-        m = self.scroll_frame  # shorthand
+        # ── Header ──
+        hdr = ctk.CTkFrame(content, fg_color="transparent")
+        hdr.pack(fill="x", pady=(0, 4))
 
-        # ── Title ──────────────────────────────────────────────────
-        ttk.Label(m, text="Taiko Forge", style="Title.TLabel").pack(
-            pady=(16, 0), padx=16, anchor="w"
-        )
-        ttk.Label(
-            m,
+        title_frame = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_frame.pack(side="left")
+        ctk.CTkLabel(
+            title_frame,
+            text="\U0001f941  Taiko Forge",
+            font=ctk.CTkFont(family="Segoe UI", size=28, weight="bold"),
+            text_color=C.TEXT,
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            title_frame,
             text="Custom DLC builder for Taiko no Tatsujin Portable DX (PSP)",
-            style="Sub.TLabel",
-        ).pack(padx=16, anchor="w", pady=(0, 8))
+            font=ctk.CTkFont(size=13),
+            text_color=C.SUBTEXT0,
+        ).pack(anchor="w", pady=(2, 0))
 
-        # ── Setup ──────────────────────────────────────────────────
-        setup_frame = ttk.LabelFrame(m, text="  Setup  ", style="TLabelframe")
-        setup_frame.pack(fill="x", padx=16, pady=(8, 4))
-        si = ttk.Frame(setup_frame, style="Card.TFrame")
-        si.pack(fill="x", padx=12, pady=8)
-        si.columnconfigure(1, weight=1)
+        # Version pill
+        pill = ctk.CTkFrame(hdr, fg_color=C.SURFACE0, corner_radius=12)
+        pill.pack(side="right", anchor="ne", pady=6)
+        ctk.CTkLabel(
+            pill,
+            text=" v1.0.0 ",
+            font=ctk.CTkFont(size=11),
+            text_color=C.OVERLAY1,
+        ).pack(padx=8, pady=2)
 
-        # Status row (dep check labels)
-        self.dep_labels: dict[str, ttk.Label] = {}
-        for col, tool in enumerate(["ffmpeg", "tja2fumen", "at3tool"]):
-            ttk.Label(si, text=f"{tool}:", style="Card.TLabel").grid(
-                row=0, column=col * 2, sticky="w", padx=(0 if col == 0 else 12, 4), pady=(0, 6)
+        # ── Separator ──
+        ctk.CTkFrame(content, fg_color=C.SURFACE1, height=1, corner_radius=0).pack(
+            fill="x", pady=(12, 16)
+        )
+
+        # ── Dependency Status Bar ──
+        dep_card = ctk.CTkFrame(content, fg_color=C.MANTLE, corner_radius=14)
+        dep_card.pack(fill="x", pady=(0, 16))
+        dep_inner = ctk.CTkFrame(dep_card, fg_color="transparent")
+        dep_inner.pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkLabel(
+            dep_inner,
+            text="Dependencies",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=C.PEACH,
+        ).pack(anchor="w", pady=(0, 8))
+
+        dep_row = ctk.CTkFrame(dep_inner, fg_color="transparent")
+        dep_row.pack(fill="x")
+
+        self.dep_pills: dict[str, ctk.CTkLabel] = {}
+        for tool in ["ffmpeg", "tja2fumen", "at3tool"]:
+            pill_frame = ctk.CTkFrame(dep_row, fg_color=C.SURFACE0, corner_radius=10)
+            pill_frame.pack(side="left", padx=(0, 8))
+            name_lbl = ctk.CTkLabel(
+                pill_frame,
+                text=f"  {tool}",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=C.TEXT,
             )
-            lbl = ttk.Label(si, text="checking…", style="Card.TLabel")
-            lbl.grid(row=0, column=col * 2 + 1, sticky="w", pady=(0, 6))
-            self.dep_labels[tool] = lbl
+            name_lbl.pack(side="left", padx=(8, 2), pady=5)
+            status_lbl = ctk.CTkLabel(
+                pill_frame,
+                text="checking\u2026  ",
+                font=ctk.CTkFont(size=11),
+                text_color=C.OVERLAY0,
+            )
+            status_lbl.pack(side="left", padx=(0, 8), pady=5)
+            self.dep_pills[tool] = status_lbl
 
-        ttk.Separator(si, orient="horizontal").grid(
-            row=1, column=0, columnspan=6, sticky="ew", pady=(0, 6)
-        )
+        # ── Setup Section ──
+        setup = _card(content, "Setup", "\u2699")
 
-        # at3tool path row
-        self.var_at3tool = tk.StringVar()
-        ttk.Label(si, text="at3tool.exe:", style="Card.TLabel").grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=4, padx=(0, 8)
-        )
-        ttk.Entry(si, textvariable=self.var_at3tool).grid(
-            row=2, column=2, columnspan=2, sticky="ew", pady=4, padx=(0, 4)
-        )
-        ttk.Button(
-            si,
-            text="Browse",
-            style="Browse.TButton",
-            command=lambda: self._pick_file(
+        self.var_at3tool = ctk.StringVar()
+        self.var_ffmpeg = ctk.StringVar()
+
+        _labeled_entry(
+            setup,
+            "at3tool.exe",
+            self.var_at3tool,
+            0,
+            browse_cmd=lambda: self._pick_file(
                 self.var_at3tool,
                 [("Executables", "*.exe"), ("All", "*.*")],
                 after=self._check_deps,
             ),
-        ).grid(row=2, column=4, pady=4, padx=(0, 4))
-        ttk.Button(
-            si,
-            text="Download",
-            style="Download.TButton",
-            command=self._download_at3tool,
-        ).grid(row=2, column=5, pady=4)
-
-        # ffmpeg path row
-        self.var_ffmpeg = tk.StringVar()
-        ttk.Label(si, text="ffmpeg:", style="Card.TLabel").grid(
-            row=3, column=0, columnspan=2, sticky="w", pady=4, padx=(0, 8)
+            extra_btn=("\u2b07 Download", self._download_at3tool, C.TEAL),
         )
-        ttk.Entry(si, textvariable=self.var_ffmpeg).grid(
-            row=3, column=2, columnspan=2, sticky="ew", pady=4, padx=(0, 4)
-        )
-        ttk.Button(
-            si,
-            text="Browse",
-            style="Browse.TButton",
-            command=lambda: self._pick_file(
+        _labeled_entry(
+            setup,
+            "ffmpeg",
+            self.var_ffmpeg,
+            1,
+            browse_cmd=lambda: self._pick_file(
                 self.var_ffmpeg,
                 [("Executables", "*.exe"), ("All", "*.*")],
                 after=self._check_deps,
             ),
-        ).grid(row=3, column=4, pady=4, padx=(0, 4))
-        ttk.Button(
-            si,
-            text="Download",
-            style="Download.TButton",
-            command=self._download_ffmpeg,
-        ).grid(row=3, column=5, pady=4)
-
-        # ── Step 1 — Song Source ───────────────────────────────────
-        s1 = ttk.LabelFrame(m, text="  Step 1 — Song Source  ", style="TLabelframe")
-        s1.pack(fill="x", **pad)
-        s1i = ttk.Frame(s1, style="Card.TFrame")
-        s1i.pack(fill="x", padx=12, pady=8)
-        s1i.columnconfigure(1, weight=1)
-
-        self.var_tja = tk.StringVar()
-        self.var_audio = tk.StringVar()
-
-        # TJA row with ESE browser button
-        ttk.Label(s1i, text="TJA Chart:", style="Card.TLabel").grid(
-            row=0, column=0, sticky="w", padx=(0, 8), pady=4
+            extra_btn=("\u2b07 Download", self._download_ffmpeg, C.TEAL),
         )
-        ttk.Entry(s1i, textvariable=self.var_tja).grid(
-            row=0, column=1, sticky="ew", pady=4, padx=(0, 4)
-        )
-        ttk.Button(
-            s1i,
+
+        # ── Step 1 — Song Source ──
+        s1 = _card(content, "Step 1 \u2014 Song Source", "\U0001f3b5")
+
+        self.var_tja = ctk.StringVar()
+        self.var_audio = ctk.StringVar()
+
+        # TJA row
+        ctk.CTkLabel(
+            s1,
+            text="TJA Chart",
+            font=ctk.CTkFont(size=12),
+            text_color=C.SUBTEXT1,
+        ).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=6)
+        ctk.CTkEntry(
+            s1,
+            textvariable=self.var_tja,
+            fg_color=C.SURFACE0,
+            border_color=C.SURFACE1,
+            text_color=C.TEXT,
+            corner_radius=8,
+            height=34,
+        ).grid(row=0, column=1, sticky="ew", pady=6, padx=(0, 6))
+        ctk.CTkButton(
+            s1,
             text="Browse",
-            style="Browse.TButton",
             command=lambda: self._pick_file(
                 self.var_tja,
                 [("TJA files", "*.tja"), ("All", "*.*")],
                 after=self._on_tja_selected,
             ),
-        ).grid(row=0, column=2, pady=4, padx=(0, 4))
-        ttk.Button(
-            s1i,
-            text="Browse ESE…",
-            style="Download.TButton",
+            fg_color=C.SURFACE1,
+            hover_color=C.SURFACE2,
+            text_color=C.TEXT,
+            corner_radius=8,
+            width=80,
+            height=32,
+            font=ctk.CTkFont(size=12),
+        ).grid(row=0, column=2, pady=6, padx=(0, 4))
+        ctk.CTkButton(
+            s1,
+            text="Browse ESE\u2026",
             command=self._open_ese_browser,
-        ).grid(row=0, column=3, pady=4)
+            fg_color=C.MAUVE,
+            hover_color=C.LAVENDER,
+            text_color=C.CRUST,
+            corner_radius=8,
+            width=110,
+            height=32,
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).grid(row=0, column=3, pady=6)
 
         # Audio row
-        ttk.Label(s1i, text="Audio File:", style="Card.TLabel").grid(
-            row=1, column=0, sticky="w", padx=(0, 8), pady=4
-        )
-        ttk.Entry(s1i, textvariable=self.var_audio).grid(
-            row=1, column=1, sticky="ew", pady=4, padx=(0, 4)
-        )
-        ttk.Button(
-            s1i,
-            text="Browse",
-            style="Browse.TButton",
-            command=lambda: self._pick_file(
+        _labeled_entry(
+            s1,
+            "Audio File",
+            self.var_audio,
+            1,
+            browse_cmd=lambda: self._pick_file(
                 self.var_audio,
                 [("Audio", "*.ogg *.mp3 *.wav *.flac"), ("All", "*.*")],
             ),
-        ).grid(row=1, column=2, pady=4, padx=(0, 4))
-        ttk.Label(
-            s1i,
-            text="(auto-filled from ESE or TJA WAVE field)",
-            style="Sub.TLabel",
-        ).grid(row=1, column=3, sticky="w", pady=4)
+        )
+        ctk.CTkLabel(
+            s1,
+            text="Auto-filled from ESE or TJA WAVE field",
+            font=ctk.CTkFont(size=11),
+            text_color=C.OVERLAY0,
+        ).grid(row=2, column=0, columnspan=4, sticky="w", pady=(0, 2))
 
         # Song info display
-        info_wrap = ttk.Frame(s1, style="Card.TFrame")
-        info_wrap.pack(fill="x", padx=12, pady=(0, 8))
-        self.lbl_song_info = ttk.Label(
-            info_wrap,
-            text="Select a TJA file or browse ESE to see song info here.",
-            style="Info.TLabel",
-            wraplength=700,
+        self.song_info_frame = ctk.CTkFrame(
+            s1.master,
+            fg_color=C.SURFACE0,
+            corner_radius=10,
         )
-        self.lbl_song_info.pack(anchor="w", padx=8, pady=6)
+        self.song_info_frame.pack(fill="x", padx=16, pady=(0, 14))
+        self.lbl_song_info = ctk.CTkLabel(
+            self.song_info_frame,
+            text="Select a TJA file or browse ESE to see song info here.",
+            font=ctk.CTkFont(size=12),
+            text_color=C.BLUE,
+            wraplength=700,
+            justify="left",
+        )
+        self.lbl_song_info.pack(padx=14, pady=10, anchor="w")
 
         self.var_tja.trace_add("write", lambda *_: self._on_tja_selected())
 
-        # ── Step 2 — DLC Settings ──────────────────────────────────
-        s2 = ttk.LabelFrame(m, text="  Step 2 — DLC Settings  ", style="TLabelframe")
-        s2.pack(fill="x", **pad)
-        s2i = ttk.Frame(s2, style="Card.TFrame")
-        s2i.pack(fill="x", padx=12, pady=8)
-        s2i.columnconfigure(1, weight=1)
+        # ── Step 2 — DLC Settings ──
+        s2 = _card(content, "Step 2 \u2014 DLC Settings", "\U0001f4e6")
 
-        self.var_template = tk.StringVar()
-        self.var_output = tk.StringVar()
-        self.var_song_id = tk.StringVar(value="00FF")
-        self.var_folder_name = tk.StringVar(value="SONG_DLC_CUSTOM")
+        self.var_template = ctk.StringVar()
+        self.var_output = ctk.StringVar()
+        self.var_song_id = ctk.StringVar(value="00FF")
+        self.var_folder_name = ctk.StringVar(value="SONG_DLC_CUSTOM")
 
-        self._path_row(
-            s2i, 0, "Template DLC Folder:", self.var_template, directory=True
+        _labeled_entry(
+            s2,
+            "Template DLC Folder",
+            self.var_template,
+            0,
+            browse_cmd=lambda: self._pick_file(self.var_template, directory=True),
         )
-        self._path_row(s2i, 1, "PSP Game Folder:", self.var_output, directory=True)
-
-        ttk.Label(s2i, text="Song ID (hex):", style="Card.TLabel").grid(
-            row=2, column=0, sticky="w", padx=(0, 8), pady=4
+        _labeled_entry(
+            s2,
+            "PSP Game Folder",
+            self.var_output,
+            1,
+            browse_cmd=lambda: self._pick_file(self.var_output, directory=True),
         )
-        id_frame = ttk.Frame(s2i, style="Card.TFrame")
-        id_frame.grid(row=2, column=1, sticky="w", pady=4)
-        ttk.Entry(id_frame, textvariable=self.var_song_id, width=8).pack(side="left")
-        ttk.Label(
+
+        # Song ID
+        ctk.CTkLabel(
+            s2,
+            text="Song ID (hex)",
+            font=ctk.CTkFont(size=12),
+            text_color=C.SUBTEXT1,
+        ).grid(row=2, column=0, sticky="w", padx=(0, 10), pady=6)
+        id_frame = ctk.CTkFrame(s2, fg_color="transparent")
+        id_frame.grid(row=2, column=1, columnspan=3, sticky="w", pady=6)
+        ctk.CTkEntry(
             id_frame,
-            text="  hex 0000–FFFF  (use a unique value per song)",
-            style="Sub.TLabel",
-        ).pack(side="left", padx=(6, 0))
+            textvariable=self.var_song_id,
+            fg_color=C.SURFACE0,
+            border_color=C.SURFACE1,
+            text_color=C.TEXT,
+            corner_radius=8,
+            width=90,
+            height=34,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            id_frame,
+            text="hex 0000\u2013FFFF \u00b7 use a unique value per song",
+            font=ctk.CTkFont(size=11),
+            text_color=C.OVERLAY0,
+        ).pack(side="left", padx=(10, 0))
 
-        ttk.Label(s2i, text="Output Folder Name:", style="Card.TLabel").grid(
-            row=3, column=0, sticky="w", padx=(0, 8), pady=4
-        )
-        ttk.Entry(s2i, textvariable=self.var_folder_name).grid(
-            row=3, column=1, sticky="ew", pady=4
-        )
+        # Folder name
+        _labeled_entry(s2, "Output Folder Name", self.var_folder_name, 3)
 
-        self.lbl_template_info = ttk.Label(s2, text="", style="Info.TLabel")
-        self.lbl_template_info.pack(anchor="w", padx=16, pady=(0, 8))
+        # Template info
+        self.lbl_template_info = ctk.CTkLabel(
+            s2.master,
+            text="",
+            font=ctk.CTkFont(size=12),
+            text_color=C.BLUE,
+            wraplength=700,
+            justify="left",
+        )
+        self.lbl_template_info.pack(padx=16, anchor="w", pady=(0, 14))
         self.var_template.trace_add("write", lambda *_: self._on_template_changed())
 
-        # ── Step 3 — Build ─────────────────────────────────────────
-        s3 = ttk.LabelFrame(m, text="  Step 3 — Build  ", style="TLabelframe")
-        s3.pack(fill="x", padx=16, pady=(4, 4))
-        s3i = ttk.Frame(s3, style="Card.TFrame")
-        s3i.pack(fill="x", padx=12, pady=12)
+        # ── Step 3 — Build ──
+        build_wrapper = ctk.CTkFrame(content, fg_color="transparent")
+        build_wrapper.pack(fill="x", pady=(0, 4))
+        ctk.CTkLabel(
+            build_wrapper,
+            text="\U0001f528  Step 3 \u2014 Build",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=C.PEACH,
+        ).pack(anchor="w", padx=4, pady=(0, 4))
 
-        self.btn_build = ttk.Button(
-            s3i, text="BUILD DLC", style="Build.TButton", command=self._do_build
+        build_card = ctk.CTkFrame(build_wrapper, fg_color=C.MANTLE, corner_radius=14)
+        build_card.pack(fill="x")
+        build_inner = ctk.CTkFrame(build_card, fg_color="transparent")
+        build_inner.pack(fill="x", padx=16, pady=16)
+
+        self.btn_build = ctk.CTkButton(
+            build_inner,
+            text="BUILD  DLC",
+            command=self._do_build,
+            fg_color=C.BLUE,
+            hover_color=C.LAVENDER,
+            text_color=C.CRUST,
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+            corner_radius=12,
+            height=50,
         )
-        self.btn_build.pack(fill="x", pady=(0, 8))
+        self.btn_build.pack(fill="x", pady=(0, 12))
 
-        self.progress_var = tk.DoubleVar(value=0.0)
-        ttk.Progressbar(
-            s3i,
+        self.progress_var = ctk.DoubleVar(value=0.0)
+        self.progress_bar = ctk.CTkProgressBar(
+            build_inner,
             variable=self.progress_var,
-            maximum=1.0,
-            mode="determinate",
-            style="Horizontal.TProgressbar",
-        ).pack(fill="x")
-
-        # ── Build Log ──────────────────────────────────────────────
-        ttk.Label(m, text="Build Log", style="Header.TLabel").pack(
-            anchor="w", padx=16, pady=(8, 2)
+            height=10,
+            progress_color=C.GREEN,
+            fg_color=C.SURFACE0,
+            corner_radius=5,
         )
-        log_wrap = tk.Frame(m, bg=C.SURFACE, bd=0)
-        log_wrap.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        self.progress_bar.pack(fill="x")
+
+        # ── Build Log ──
+        log_wrapper = ctk.CTkFrame(content, fg_color="transparent")
+        log_wrapper.pack(fill="x", pady=(12, 4))
+        ctk.CTkLabel(
+            log_wrapper,
+            text="\U0001f4cb  Build Log",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=C.PEACH,
+        ).pack(anchor="w", padx=4, pady=(0, 4))
+
+        log_card = ctk.CTkFrame(log_wrapper, fg_color=C.MANTLE, corner_radius=14)
+        log_card.pack(fill="x")
+
         self.log_text = tk.Text(
-            log_wrap,
-            bg=C.SURFACE,
+            log_card,
+            bg=C.MANTLE,
             fg=C.TEXT,
             insertbackground=C.TEXT,
-            font=("Cascadia Code", 9),
+            font=("Cascadia Code", 10),
             relief="flat",
-            padx=8,
-            pady=8,
+            padx=14,
+            pady=12,
             height=14,
             wrap="word",
             state="disabled",
+            highlightthickness=0,
+            bd=0,
         )
-        log_scroll = ttk.Scrollbar(log_wrap, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        log_scroll.pack(side="right", fill="y")
-        self.log_text.pack(fill="both", expand=True)
-        for tag, color in [("ok", C.GREEN), ("warn", C.YELLOW), ("err", C.RED), ("info", C.BLUE)]:
+        log_sb = ctk.CTkScrollbar(
+            log_card,
+            command=self.log_text.yview,
+            fg_color=C.MANTLE,
+            button_color=C.SURFACE1,
+            button_hover_color=C.SURFACE2,
+        )
+        self.log_text.configure(yscrollcommand=log_sb.set)
+        log_sb.pack(side="right", fill="y", padx=(0, 6), pady=8)
+        self.log_text.pack(fill="both", expand=True, padx=(6, 0), pady=6)
+
+        for tag, color in [
+            ("ok", C.GREEN),
+            ("warn", C.YELLOW),
+            ("err", C.RED),
+            ("info", C.BLUE),
+        ]:
             self.log_text.tag_configure(tag, foreground=color)
 
-        self._log("Ready. Use Step 1 to pick a song, Step 2 to set DLC options, then Build.", "info")
+        self._log("Ready. Pick a song \u2192 set DLC options \u2192 Build.", "info")
 
-    # ── path helpers ────────────────────────────────────────────────
-    def _path_row(self, parent, row, label, var, filetypes=None, directory=False):
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(
-            row=row, column=0, sticky="w", padx=(0, 8), pady=4
+        # ── Footer ──
+        ctk.CTkFrame(content, fg_color=C.SURFACE1, height=1, corner_radius=0).pack(
+            fill="x", pady=(16, 8)
         )
-        ttk.Entry(parent, textvariable=var).grid(
-            row=row, column=1, sticky="ew", pady=4, padx=(0, 4)
-        )
+        ctk.CTkLabel(
+            content,
+            text="Taiko Forge \u00b7 github.com/SonnyTaylor/taiko-forge",
+            font=ctk.CTkFont(size=11),
+            text_color=C.OVERLAY0,
+        ).pack(pady=(0, 8))
 
-        def browse():
-            path = (
-                filedialog.askdirectory(title=label)
-                if directory
-                else filedialog.askopenfilename(title=label, filetypes=filetypes)
-            )
-            if path:
-                var.set(path)
-
-        ttk.Button(parent, text="Browse", style="Browse.TButton", command=browse).grid(
-            row=row, column=2, pady=4
-        )
-
+    # ── File picking ────────────────────────────────────────────────
     def _pick_file(self, var, filetypes=None, directory=False, after=None):
         path = (
             filedialog.askdirectory()
@@ -722,7 +869,7 @@ class App:
             if after:
                 after()
 
-    # ── state ────────────────────────────────────────────────────────
+    # ── State persistence ───────────────────────────────────────────
     def _restore_state(self):
         c = self.cfg
         self.var_at3tool.set(c.get("at3tool", ""))
@@ -734,8 +881,8 @@ class App:
 
         if not self.var_at3tool.get():
             for candidate in [
-                CONFIG_DIR / "tools" / "at3tool" / "at3tool.exe",  # downloaded
-                _PROJECT_ROOT / "tools" / "at3tool" / "at3tool.exe",  # dev / manual
+                CONFIG_DIR / "tools" / "at3tool" / "at3tool.exe",
+                _PROJECT_ROOT / "tools" / "at3tool" / "at3tool.exe",
             ]:
                 if candidate.exists():
                     self.var_at3tool.set(str(candidate))
@@ -754,7 +901,7 @@ class App:
         )
         save_config(self.cfg)
 
-    # ── dep check ───────────────────────────────────────────────────
+    # ── Dependency checking ─────────────────────────────────────────
     def _check_deps(self):
         at3 = self.var_at3tool.get()
         if not at3 or not os.path.isfile(at3):
@@ -783,31 +930,25 @@ class App:
         except ImportError:
             pass
 
-        hints = {
-            "ffmpeg": "  NOT FOUND — click Download",
-            "tja2fumen": "  NOT FOUND — run: uv add tja2fumen",
-            "at3tool": "  NOT FOUND — click Download",
-        }
         for tool, path in deps.items():
-            lbl = self.dep_labels[tool]
+            pill = self.dep_pills[tool]
             if path:
-                display = "(Python package)" if tool == "tja2fumen" else f"({Path(path).name})"
-                lbl.configure(text=f"✓ OK  {display}", foreground=C.GREEN)
+                pill.configure(text="\u2713 OK  ", text_color=C.GREEN)
             else:
-                lbl.configure(text=hints[tool], foreground=C.RED)
+                pill.configure(text="\u2717 Missing  ", text_color=C.RED)
 
-    # ── download helpers ────────────────────────────────────────────
+    # ── Download helpers ────────────────────────────────────────────
     def _download_at3tool(self):
-        dlg = _ProgressDialog(self.root, "Downloading at3tool")
+        dlg = ProgressDialog(self, "Downloading at3tool")
 
         def run():
             from taiko_forge.downloader import download_at3tool
 
             try:
-                dlg.status("Downloading at3tool.zip from PSPunk…")
+                dlg.status("Downloading at3tool.zip\u2026")
                 exe = download_at3tool(_TOOLS_DIR, dlg.progress)
                 self.var_at3tool.set(str(exe))
-                self.root.after(0, self._check_deps)
+                self.after(0, self._check_deps)
                 dlg.done("at3tool ready!")
             except Exception as exc:
                 dlg.error(str(exc))
@@ -815,16 +956,16 @@ class App:
         threading.Thread(target=run, daemon=True).start()
 
     def _download_ffmpeg(self):
-        dlg = _ProgressDialog(self.root, "Downloading ffmpeg")
+        dlg = ProgressDialog(self, "Downloading ffmpeg")
 
         def run():
             from taiko_forge.downloader import download_ffmpeg
 
             try:
-                dlg.status("Downloading ffmpeg essentials (~14 MB)…")
+                dlg.status("Downloading ffmpeg essentials (~14 MB)\u2026")
                 exe = download_ffmpeg(_TOOLS_DIR, dlg.progress)
                 self.var_ffmpeg.set(str(exe))
-                self.root.after(0, self._check_deps)
+                self.after(0, self._check_deps)
                 dlg.done("ffmpeg ready!")
             except Exception as exc:
                 dlg.error(str(exc))
@@ -838,7 +979,7 @@ class App:
             self.var_audio.set(ogg_path)
             self._on_tja_selected()
 
-        _ESEDialog(self.root, on_select)
+        ESEDialog(self, on_select)
 
     # ── TJA callbacks ───────────────────────────────────────────────
     def _on_tja_selected(self):
@@ -852,8 +993,8 @@ class App:
             )
             self.lbl_song_info.configure(
                 text=(
-                    f"Title: {info['title']}   |   Artist: {info['subtitle']}\n"
-                    f"BPM: {info['bpm']}   |   Demo Start: {info['demostart']}s\n"
+                    f"Title: {info['title']}   \u00b7   Artist: {info['subtitle']}\n"
+                    f"BPM: {info['bpm']}   \u00b7   Demo Start: {info['demostart']}s\n"
                     f"Difficulties: {courses}"
                 )
             )
@@ -877,12 +1018,12 @@ class App:
         fumen_count = sum(1 for f in edats if "FUMEN" in f.upper())
         preview = ", ".join(sorted(edats)[:8])
         if len(edats) > 8:
-            preview += "…"
+            preview += "\u2026"
         self.lbl_template_info.configure(
             text=f"{len(edats)} EDAT files ({fumen_count} fumen): {preview}"
         )
 
-    # ── log ──────────────────────────────────────────────────────────
+    # ── Logging ─────────────────────────────────────────────────────
     def _log(self, msg, tag=None):
         self.log_text.configure(state="normal")
         self.log_text.insert("end", msg + "\n", tag or "")
@@ -890,12 +1031,12 @@ class App:
         self.log_text.configure(state="disabled")
 
     def _log_ts(self, msg, tag=None):
-        self.root.after(0, self._log, msg, tag)
+        self.after(0, self._log, msg, tag)
 
     def _progress_ts(self, val):
-        self.root.after(0, lambda: self.progress_var.set(val))
+        self.after(0, lambda: self.progress_var.set(val))
 
-    # ── build ────────────────────────────────────────────────────────
+    # ── Build ───────────────────────────────────────────────────────
     def _validate(self) -> bool:
         errors = []
         if not self.var_tja.get() or not os.path.isfile(self.var_tja.get()):
@@ -908,12 +1049,12 @@ class App:
             errors.append("PSP game folder not found")
         at3 = self.var_at3tool.get()
         if not at3 or not os.path.isfile(at3):
-            errors.append("at3tool.exe not found — use Download button in Setup")
+            errors.append("at3tool.exe not found \u2014 use Download in Setup")
         ffmpeg = self.var_ffmpeg.get() or "ffmpeg"
         try:
             subprocess.run([ffmpeg, "-version"], capture_output=True, timeout=5)
         except Exception:
-            errors.append("ffmpeg not found — use Download button in Setup")
+            errors.append("ffmpeg not found \u2014 use Download in Setup")
         try:
             from tja2fumen import main as _  # noqa: F401
         except ImportError:
@@ -923,10 +1064,12 @@ class App:
             if not 0 <= sid <= 0xFFFF:
                 raise ValueError
         except ValueError:
-            errors.append("Song ID must be hex 0000–FFFF")
+            errors.append("Song ID must be hex 0000\u2013FFFF")
 
         if errors:
-            messagebox.showerror("Cannot Build", "\n".join(f"• {e}" for e in errors))
+            messagebox.showerror(
+                "Cannot Build", "\n".join(f"\u2022 {e}" for e in errors)
+            )
             return False
         return True
 
@@ -958,12 +1101,12 @@ class App:
             try:
                 builder.build()
                 self._log_ts("")
-                self._log_ts("Done! Your custom DLC is ready.", "ok")
+                self._log_ts("Done! Your custom DLC is ready. \U0001f389", "ok")
             except Exception as exc:
                 self._log_ts(f"\nERROR: {exc}", "err")
                 self._log_ts("Build failed. Check the log above.", "err")
             finally:
-                self.root.after(0, self._build_done)
+                self.after(0, self._build_done)
 
         threading.Thread(target=run, daemon=True).start()
 
@@ -973,10 +1116,5 @@ class App:
 
 
 def main():
-    root = tk.Tk()
-    try:
-        root.iconbitmap(default="")
-    except Exception:
-        pass
-    App(root)
-    root.mainloop()
+    app = App()
+    app.mainloop()
