@@ -1,0 +1,69 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so git describe works
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Build EXE
+        run: uv run pyinstaller taiko-forge.spec --clean
+
+      - name: Generate release notes
+        shell: pwsh
+        run: |
+          $prev = git describe --tags --abbrev=0 HEAD^ 2>$null
+
+          $header = @"
+          ## Download
+
+          | File | Platform | Notes |
+          |------|----------|-------|
+          | **taiko-forge.exe** | Windows 10/11 | Standalone — no Python required |
+
+          > **First run?** Click **Download** in the Setup section to auto-install at3tool and ffmpeg.
+
+          ## What's Changed
+
+          "@
+
+          if ($prev) {
+            $changes = git log "${prev}..HEAD" --pretty=format:"- %s (%h)" --no-merges
+          } else {
+            $changes = git log --pretty=format:"- %s (%h)" --no-merges
+          }
+
+          ($header + ($changes -join "`n")) | Out-File release_notes.md -Encoding utf8
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Taiko Forge ${{ github.ref_name }}
+          body_path: release_notes.md
+          files: dist/taiko-forge.exe
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

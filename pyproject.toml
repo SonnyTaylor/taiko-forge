@@ -9,6 +9,11 @@ dependencies = [
     "tja2fumen>=0.9.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.0",
+]
+
 [project.scripts]
 taiko-forge = "taiko_forge.app:main"
 
