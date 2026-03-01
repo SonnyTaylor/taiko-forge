@@ -106,11 +106,21 @@ class DLCBuilder:
             step += 1
             self.progress(step / steps)
 
-        # 7 -- Song ID
-        self.log(f"[7/{steps}] Setting song ID to 0x{self.song_id:04X}...")
+        # 7 -- Song ID + difficulty bytes
+        self.log(
+            f"[7/{steps}] Setting song ID to 0x{self.song_id:04X} and difficulty bytes..."
+        )
         mi = self._find_file("MUSIC_INFO")
         if mi:
-            patch_music_info(mi, self.song_id)
+            # Map TJA course names (e.g. "Oni", "Easy") to single-letter suffixes
+            # so patch_music_info can write the correct difficulty type bytes.
+            name_to_suffix = {v.lower(): k for k, v in DIFF_MAP.items()}
+            courses_by_suffix = {
+                name_to_suffix[name.lower()]: level
+                for name, level in self.tja_info.get("courses", {}).items()
+                if name.lower() in name_to_suffix
+            }
+            patch_music_info(mi, self.song_id, courses=courses_by_suffix)
         else:
             self.log("  WARNING: MUSIC_INFO.EDAT not found in template!")
         self.progress(1.0)
@@ -133,9 +143,7 @@ class DLCBuilder:
 
     def _find_files(self, pattern: str) -> list[str]:
         pat = pattern.upper()
-        return [
-            str(f) for f in self.output_dir.iterdir() if pat in f.name.upper()
-        ]
+        return [str(f) for f in self.output_dir.iterdir() if pat in f.name.upper()]
 
     def _patch_edats(
         self, at3_song: str, at3_preview: str, fumens: dict[str, str]
@@ -153,9 +161,7 @@ class DLCBuilder:
 
         if song_edat:
             offset = inject_at3_into_edat(song_edat, at3_song)
-            self.log(
-                f"  Injected audio at 0x{offset:X} in {Path(song_edat).name}"
-            )
+            self.log(f"  Injected audio at 0x{offset:X} in {Path(song_edat).name}")
         else:
             self.log("  WARNING: No SONG EDAT found for audio injection!")
 
@@ -163,9 +169,7 @@ class DLCBuilder:
         preview_edat = self._find_file("SONG_S")
         if preview_edat:
             offset = inject_at3_into_edat(preview_edat, at3_preview)
-            self.log(
-                f"  Injected preview at 0x{offset:X} in {Path(preview_edat).name}"
-            )
+            self.log(f"  Injected preview at 0x{offset:X} in {Path(preview_edat).name}")
         else:
             self.log("  WARNING: No SONG_S EDAT found for preview!")
 
@@ -175,20 +179,27 @@ class DLCBuilder:
             fumen_edat = self._match_fumen_edat(suffix, diff_name)
             if fumen_edat:
                 replace_fumen_edat(fumen_edat, fumen_path)
-                self.log(
-                    f"  Replaced {Path(fumen_edat).name} with {diff_name} chart"
-                )
+                self.log(f"  Replaced {Path(fumen_edat).name} with {diff_name} chart")
             else:
-                self.log(
-                    f"  WARNING: No FUMEN EDAT found for {diff_name}!"
-                )
+                self.log(f"  WARNING: No FUMEN EDAT found for {diff_name}!")
 
     def _match_fumen_edat(self, suffix: str, diff_name: str) -> str | None:
+        # 3-letter abbreviations sometimes used in PSP DLC filenames
+        _ABBREV = {
+            "e": "EZY",
+            "n": "NRM",
+            "h": "HRD",
+            "m": "ONI",
+            "x": "URA",
+        }
+        abbrev = _ABBREV.get(suffix, suffix.upper())
         for pat in [
-            f"FUMEN_{diff_name}",
-            f"FUMEN{diff_name}",
-            f"FUMEN_{suffix.upper()}",
-            f"FUMEN{suffix.upper()}",
+            f"FUMEN_{diff_name}",  # FUMEN_ONI
+            f"FUMEN{diff_name}",  # FUMENONI
+            f"FUMEN_{abbrev}",  # FUMEN_ONI (via abbrev, same for ONI but different for others)
+            f"FUMEN{abbrev}",  # FUMENONI
+            f"FUMEN_{suffix.upper()}",  # FUMEN_M
+            f"FUMEN{suffix.upper()}",  # FUMENM
         ]:
             hit = self._find_file(pat)
             if hit:
