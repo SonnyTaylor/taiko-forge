@@ -46,6 +46,7 @@ jobs:
           | **taiko-forge.exe** | Windows 10/11 | Standalone — no Python required |
 
           > **First run?** Click **Download** in the Setup section to auto-install at3tool and ffmpeg.
+          > A default DLC template (`SONG_DLC_123.zip`) is bundled in the app.
 
           ## What's Changed
 

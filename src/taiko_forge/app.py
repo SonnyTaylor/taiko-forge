@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import zipfile
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -21,6 +22,23 @@ if getattr(sys, "frozen", False):
     _TOOLS_DIR = CONFIG_DIR / "tools"
 else:
     _TOOLS_DIR = _PROJECT_ROOT / "tools"
+
+_BUNDLED_TEMPLATE_ZIP = "SONG_DLC_123.zip"
+
+
+def _find_bundled_template_zip() -> str:
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            candidates.append(Path(meipass) / _BUNDLED_TEMPLATE_ZIP)
+        candidates.append(Path(sys.executable).resolve().parent / _BUNDLED_TEMPLATE_ZIP)
+    candidates.append(_PROJECT_ROOT / _BUNDLED_TEMPLATE_ZIP)
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return ""
 
 
 # ── Catppuccin Mocha ────────────────────────────────────────────────
@@ -652,7 +670,7 @@ class App(ctk.CTk):
         pill.pack(side="right", anchor="ne", pady=6)
         ctk.CTkLabel(
             pill,
-            text=" v2.0.0 ",
+            text=" v2.0.1 ",
             font=ctk.CTkFont(size=11),
             text_color=C.OVERLAY1,
         ).pack(padx=8, pady=2)
@@ -827,7 +845,7 @@ class App(ctk.CTk):
 
         _labeled_entry(
             s2,
-            "Template DLC Folder",
+            "Template DLC (Folder or ZIP)",
             self.var_template,
             0,
             browse_cmd=lambda: self._pick_file(self.var_template, directory=True),
@@ -1122,7 +1140,11 @@ class App(ctk.CTk):
         c = self.cfg
         self.var_at3tool.set(c.get("at3tool", ""))
         self.var_ffmpeg.set(c.get("ffmpeg", ""))
-        self.var_template.set(c.get("template", ""))
+        saved_template = c.get("template", "")
+        if self._is_template_source(saved_template):
+            self.var_template.set(saved_template)
+        else:
+            self.var_template.set(_find_bundled_template_zip())
         self.var_output.set(c.get("output", ""))
         self.var_song_id.set(c.get("song_id", "00FF"))
         self.var_folder_name.set(c.get("folder_name", "SONG_DLC_CUSTOM"))
@@ -1258,18 +1280,43 @@ class App(ctk.CTk):
 
     def _on_template_changed(self):
         path = self.var_template.get()
-        if not path or not os.path.isdir(path):
+        if not self._is_template_source(path):
             self.lbl_template_info.configure(text="")
             return
-        files = os.listdir(path)
-        edats = [f for f in files if f.upper().endswith(".EDAT")]
-        fumen_count = sum(1 for f in edats if "FUMEN" in f.upper())
-        preview = ", ".join(sorted(edats)[:8])
-        if len(edats) > 8:
-            preview += "\u2026"
-        self.lbl_template_info.configure(
-            text=f"{len(edats)} EDAT files ({fumen_count} fumen): {preview}"
-        )
+
+        try:
+            if os.path.isdir(path):
+                files = os.listdir(path)
+                edats = [f for f in files if f.upper().endswith(".EDAT")]
+                fumen_count = sum(1 for f in edats if "FUMEN" in f.upper())
+                preview = ", ".join(sorted(edats)[:8])
+                if len(edats) > 8:
+                    preview += "\u2026"
+                self.lbl_template_info.configure(
+                    text=f"{len(edats)} EDAT files ({fumen_count} fumen): {preview}"
+                )
+                return
+
+            with zipfile.ZipFile(path, "r") as zf:
+                entries = [Path(i.filename).name for i in zf.infolist() if not i.is_dir()]
+
+            edats = sorted({name for name in entries if name.upper().endswith(".EDAT")})
+            fumen_count = sum(1 for f in edats if "FUMEN" in f.upper())
+            preview = ", ".join(edats[:8])
+            if len(edats) > 8:
+                preview += "\u2026"
+            self.lbl_template_info.configure(
+                text=f"ZIP template: {len(edats)} EDAT files ({fumen_count} fumen): {preview}"
+            )
+        except Exception as exc:
+            self.lbl_template_info.configure(text=f"Template read error: {exc}")
+
+    def _is_template_source(self, path: str) -> bool:
+        if not path:
+            return False
+        if os.path.isdir(path):
+            return True
+        return os.path.isfile(path) and path.lower().endswith(".zip")
 
     # ── Logging ─────────────────────────────────────────────────────
     def _log(self, msg, tag=None):
@@ -1358,8 +1405,8 @@ class App(ctk.CTk):
         ffmpeg = self.var_ffmpeg.get() or "ffmpeg"
 
         errors = []
-        if not template or not os.path.isdir(template):
-            errors.append("Template DLC folder not set")
+        if not self._is_template_source(template):
+            errors.append("Template DLC folder/zip not set")
         if not output or not os.path.isdir(output):
             errors.append("PSP game folder not set")
         if not at3 or not os.path.isfile(at3):
@@ -1481,8 +1528,8 @@ class App(ctk.CTk):
             errors.append("TJA chart file not found")
         if not self.var_audio.get() or not os.path.isfile(self.var_audio.get()):
             errors.append("Audio file not found")
-        if not self.var_template.get() or not os.path.isdir(self.var_template.get()):
-            errors.append("Template DLC folder not found")
+        if not self._is_template_source(self.var_template.get()):
+            errors.append("Template DLC folder/zip not found")
         if not self.var_output.get() or not os.path.isdir(self.var_output.get()):
             errors.append("PSP game folder not found")
         at3 = self.var_at3tool.get()

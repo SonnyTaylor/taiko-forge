@@ -72,8 +72,9 @@ uv run python -m taiko_forge
 
 ### Quick start
 
-1. **Get a template DLC folder** -- Copy any existing `SONG_DLC_XXX` folder from
-   your PSP's `PSP/GAME/NPJH50426/` directory. This is used as the base structure.
+1. **Template DLC is bundled** -- Taiko Forge ships with `SONG_DLC_123.zip` and
+  uses it by default as the base structure. You can still browse to your own
+  template folder if you want.
 
 2. **Get a TJA chart** -- Either create your own or grab one from the
    [ESE (Every Song Ever)](https://git.vanillaaaa.org/ESE/ESE) community database,

@@ -3,12 +3,15 @@
 from PyInstaller.utils.hooks import collect_data_files
 
 tja2fumen_datas = collect_data_files('tja2fumen')
+app_datas = [
+    ('SONG_DLC_123.zip', '.'),
+]
 
 a = Analysis(
     ['src/taiko_forge/__main__.py'],
     pathex=['src'],
     binaries=[],
-    datas=tja2fumen_datas,
+    datas=tja2fumen_datas + app_datas,
     hiddenimports=[
         'taiko_forge',
         'taiko_forge.app',

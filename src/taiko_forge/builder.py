@@ -7,6 +7,7 @@ a single linear pipeline that produces a ready-to-copy DLC folder.
 import os
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Callable
 
@@ -59,11 +60,12 @@ class DLCBuilder:
         self.log(f"[1/{steps}] Copying template DLC folder...")
         if self.output_dir.exists():
             shutil.rmtree(self.output_dir)
-        shutil.copytree(self.template_dir, self.output_dir)
-        step += 1
-        self.progress(step / steps)
-
         with tempfile.TemporaryDirectory() as tmpdir:
+            template_dir = self._resolve_template_dir(tmpdir)
+            shutil.copytree(template_dir, self.output_dir)
+            step += 1
+            self.progress(step / steps)
+
             # 2 -- Source audio -> 44100 Hz 16-bit WAV
             self.log(f"[2/{steps}] Converting audio to 44100 Hz WAV...")
             wav_full = os.path.join(tmpdir, "song.wav")
@@ -134,16 +136,44 @@ class DLCBuilder:
     # Internals
     # ------------------------------------------------------------------
 
+    def _resolve_template_dir(self, tmpdir: str) -> Path:
+        source = self.template_dir
+        if source.is_dir():
+            return source
+
+        if source.is_file() and source.suffix.lower() == ".zip":
+            extract_root = Path(tmpdir) / "template"
+            extract_root.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(source, "r") as zf:
+                zf.extractall(extract_root)
+
+            direct_edats = [f for f in extract_root.iterdir() if f.is_file() and f.suffix.upper() == ".EDAT"]
+            if direct_edats:
+                return extract_root
+
+            candidates = [d for d in extract_root.iterdir() if d.is_dir()]
+            for candidate in candidates:
+                if any(f.is_file() and f.suffix.upper() == ".EDAT" for f in candidate.iterdir()):
+                    return candidate
+
+            raise FileNotFoundError(f"No DLC template folder with EDAT files found in zip: {source}")
+
+        raise FileNotFoundError(f"Template DLC source not found: {source}")
+
     def _find_file(self, pattern: str) -> str | None:
         pat = pattern.upper()
-        for f in self.output_dir.iterdir():
-            if pat in f.name.upper():
+        for f in self.output_dir.rglob("*"):
+            if f.is_file() and pat in f.name.upper():
                 return str(f)
         return None
 
     def _find_files(self, pattern: str) -> list[str]:
         pat = pattern.upper()
-        return [str(f) for f in self.output_dir.iterdir() if pat in f.name.upper()]
+        return [
+            str(f)
+            for f in self.output_dir.rglob("*")
+            if f.is_file() and pat in f.name.upper()
+        ]
 
     def _patch_edats(
         self, at3_song: str, at3_preview: str, fumens: dict[str, str]
