@@ -1,10 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files
+
+tja2fumen_datas = collect_data_files('tja2fumen')
+
 a = Analysis(
     ['src/taiko_forge/__main__.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=tja2fumen_datas,
     hiddenimports=[
         'taiko_forge',
         'taiko_forge.app',
